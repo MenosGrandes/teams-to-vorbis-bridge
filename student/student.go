@@ -3,6 +3,7 @@ package student
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
@@ -131,11 +132,34 @@ func IsNameMatch(a, b string) bool {
 	return coverageA >= 0.9 || coverageB >= 0.9
 }
 func SetupGrades(students_from, students_into []*Student) {
-	for _, student := range students_into {
-		s, err := student.FindStudent(students_from)
-		if err == nil {
-			student.Grade = s.Grade
+
+	const workers = 8
+
+	jobs := make(chan *Student)
+
+	var wg sync.WaitGroup
+
+	worker := func() {
+		defer wg.Done()
+
+		for st := range jobs {
+			s, err := st.FindStudent(students_from)
+			if err == nil {
+				st.Grade = s.Grade
+			}
 		}
 	}
+
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go worker()
+	}
+
+	for _, st := range students_into {
+		jobs <- st
+	}
+
+	close(jobs)
+	wg.Wait()
 
 }
