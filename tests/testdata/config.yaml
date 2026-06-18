@@ -1,0 +1,30 @@
+result_column: H
+from_first_name_col: A
+from_last_name_col: B
+from_grade_col: H
+into_name_col: B
+into_grade_col: E
+skip_cols: D
+
+grades:
+  0: 2
+  15: 3
+  20: 3.5
+  22: 4
+  26: 4.5
+  28: 5
+
+formula: |
+  if D > 0 then
+    return getGrade(D)
+  end
+  local weighted = E * 2 + F
+  local maxPossible = 15 * 2 + 15
+  local normalized = (weighted / maxPossible) * 30
+  if E > 10 and F > 10 then
+    normalized = normalized + 2
+  end
+  if normalized > 30 then
+    normalized = 30
+  end
+  return getGrade(math.floor(normalized))

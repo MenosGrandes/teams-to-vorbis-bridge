@@ -5,7 +5,9 @@ go 1.24.4
 require (
 	github.com/stretchr/testify v1.11.1
 	github.com/xuri/excelize/v2 v2.10.1
+	github.com/yuin/gopher-lua v1.1.2
 	golang.org/x/text v0.34.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -18,5 +20,4 @@ require (
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -4,126 +4,138 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
-	"vgc/main/constants"
-	utils "vgc/main/excel"
-	"vgc/main/student"
 
-	"github.com/xuri/excelize/v2"
+	"vgc/main/engine/impl"
+	exportimpl "vgc/main/export/impl"
+	"vgc/main/grading"
+	"vgc/main/matching"
+	"vgc/main/pipeline"
+	"vgc/main/spreadsheet"
 )
 
-//
-
-// Names are always in second, split them
-func readStudentsInto(f *excelize.File, stundet_name_row int) ([]*student.Student, error) {
-	studets := make([]*student.Student, 0)
-
-	// Get all the rows in the Sheet1.
-	rows, err := f.GetRows(constants.SHEET_NAME)
-	if err != nil {
-		fmt.Println(err)
-		return studets, nil
-	}
-
-	for _, row := range rows[1:] {
-		studets = append(studets, student.NewStudent(row[stundet_name_row], 0))
-	}
-	return studets, nil
+type config struct {
+	from        string
+	into        string
+	output      string
+	gradeConfig string
+	sheet       string
 }
-func readStudentsFrom(f *excelize.File, row_number_first_name, row_number_second_name, row_number_grade int) ([]*student.Student, error) {
-	studets := make([]*student.Student, 0)
 
-	rows, err := f.GetRows(constants.SHEET_NAME)
-	if err != nil {
-		fmt.Println(err)
-		return studets, nil
+func parseFlags() (*config, error) {
+	cfg := &config{}
+	flag.StringVar(&cfg.into, "into", "", "Teams export file path")
+	flag.StringVar(&cfg.from, "from", "", "Vorbis grades file path")
+	flag.StringVar(&cfg.output, "output", "output.csv", "output CSV file path")
+	flag.StringVar(&cfg.gradeConfig, "grade-config", "", "grading YAML config path")
+	flag.StringVar(&cfg.sheet, "sheet", "a", "sheet name in xlsx files")
+	flag.Parse()
+
+	if cfg.into == "" || cfg.from == "" || cfg.gradeConfig == "" {
+		return nil, fmt.Errorf("usage: app --into <file> --from <file> --grade-config <file> [--output <file>] [--sheet <name>]")
 	}
 
-	for _, row := range rows[1:] {
-		name_array := make([]string, 2)
-		name_array = append(name_array, row[row_number_first_name], row[row_number_second_name])
-		name := strings.Join(name_array, " ")
-		grade, error_grade := strconv.ParseFloat(row[row_number_grade], 32)
-		if error_grade != nil {
-			fmt.Println(err)
-			return studets, &student.StudentError{Message: "Grade is not int in excel", Name: name}
+	for _, p := range []string{cfg.into, cfg.from, cfg.gradeConfig} {
+		if _, err := os.Stat(p); err != nil {
+			return nil, err
 		}
-		studets = append(studets, student.NewStudent(name, float32(grade)))
 	}
-	return studets, nil
+
+	return cfg, nil
 }
-func validateFile(path string) error {
-	_, err := os.Stat(path)
+
+func run() error {
+	cfg, err := parseFlags()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("input file does not exist: %s", path)
-		}
-		return fmt.Errorf("failed to check file %s: %w", path, err)
+		return err
 	}
-	return nil
+
+	gradeCfg, err := grading.LoadConfig(cfg.gradeConfig)
+	if err != nil {
+		return err
+	}
+
+	skipCols, err := spreadsheet.ColToIndex(gradeCfg.SkipCols)
+	if err != nil {
+		fmt.Println("DUPA1")
+		return err
+	}
+	fromFirstCol, err := spreadsheet.ColToIndex(gradeCfg.FromFirstNameCol)
+	if err != nil {
+				fmt.Println("DUPA2")
+
+		return err
+	}
+	fromLastCol, err := spreadsheet.ColToIndex(gradeCfg.FromLastNameCol)
+	if err != nil {
+				fmt.Println("DUPA3")
+
+		return err
+	}
+	fromGradeCol, err := spreadsheet.ColToIndex(gradeCfg.FromGradeCol)
+	if err != nil {
+				fmt.Println("DUPA4")
+
+		return err
+	}
+	intoNameCol, err := spreadsheet.ColToIndex(gradeCfg.IntoNameCol)
+	if err != nil {
+				fmt.Println("DUPA15")
+
+		return err
+	}
+
+	eng, err := impl.NewLuaEngine(gradeCfg.Formula, gradeCfg.Grades)
+	if err != nil {
+		return err
+	}
+	defer eng.Close()
+
+	fromFile, err := spreadsheet.Open(cfg.from, cfg.sheet)
+	if err != nil {
+		return err
+	}
+	defer fromFile.Close()
+
+	rows, err := fromFile.Rows()
+	if err != nil {
+		return err
+	}
+	grades, err := pipeline.Grade(eng, rows[1:], skipCols)
+	if err != nil {
+		return err
+	}
+	for i, grade := range grades {
+		if err := fromFile.SetCell(gradeCfg.ResultColumn, i+2, grade); err != nil {
+			return err
+		}
+	}
+
+	studentsFrom, err := fromFile.ReadGrades(fromFirstCol, fromLastCol, fromGradeCol)
+	if err != nil {
+		return err
+	}
+
+	intoFile, err := spreadsheet.Open(cfg.into, cfg.sheet)
+	if err != nil {
+		return err
+	}
+	defer intoFile.Close()
+
+	if err := intoFile.WriteGrades(studentsFrom, intoNameCol, gradeCfg.IntoGradeCol, matching.IsMatch); err != nil {
+		return err
+	}
+
+	rows, err = intoFile.Rows()
+	if err != nil {
+		return err
+	}
+
+	return exportimpl.NewCSVExporter().Export(rows, cfg.output)
 }
 
 func main() {
-
-	into_file_path := flag.String("into", "", "input file path")
-	from_file_path := flag.String("from", "", "from file path")
-	output_file_path := flag.String("output", "", "output file path")
-
-	flag.Parse()
-
-	if *into_file_path == "" || *from_file_path == "" {
-		fmt.Println("usage: app --into <file> --from <file>")
-		return
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
 	}
-	if err := validateFile(*into_file_path); err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	if err := validateFile(*from_file_path); err != nil {
-		fmt.Println("error:", err)
-		return
-	}
-	//
-	into_file, err := excelize.OpenFile(*into_file_path)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer func() {
-		// Close the spreadsheet.
-		if err := into_file.Close(); err != nil {
-			fmt.Println(err)
-		}
-	}()
-
-	students_into, eror := readStudentsInto(into_file, 1)
-
-	if eror != nil {
-		fmt.Println(eror)
-		return
-	}
-
-	from_file, err := excelize.OpenFile(*from_file_path)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer func() {
-		// Close the spreadsheet.
-		if err := from_file.Close(); err != nil {
-			fmt.Println(err)
-		}
-	}()
-	students_from, eror__fropm := readStudentsFrom(from_file, 0, 1, 7)
-
-	if eror__fropm != nil {
-		fmt.Println(eror__fropm)
-		return
-	}
-	student.SetupGrades(students_from, students_into)
-	//students_into write to file. Loop over into.xml, find all student and put the grade.
-	//Always in E column
-	utils.SaveStudentGradesToCSV(students_from, into_file, "E", *output_file_path)
-
 }

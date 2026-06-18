@@ -1,0 +1,26 @@
+result_column: O
+from_first_name_col: A
+from_last_name_col: B
+from_grade_col: O
+into_name_col: B
+into_grade_col: F
+skip_cols: D
+
+grades:
+  0: 2
+  15: 3
+  20: 3.5
+  22: 4
+  26: 4.5
+  28: 5
+
+formula: |
+
+  local gt_sum = (G or 0)+(J or 0)
+  if gt_sum >= 15 then
+    return getGrade(gt_sum)
+  end
+  if D and D >= ( 30*0.75) then
+    return 3
+  end
+  return 2
